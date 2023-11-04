@@ -86,7 +86,22 @@ func trigger(s *Schedule) func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		job.execCommandWithRetry("ui") // trigger
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		params := make(map[string]string)
+		for key, defaultValue := range job.Params {
+			if _, ok := r.Form[key]; ok {
+				params[key] = r.FormValue(key)
+			} else {
+				params[key] = defaultValue
+			}
+		}
+
+		job.execCommandWithRetry("ui", params) // trigger
 
 		status := Response{Job: jobId, Status: "ok", Type: "trigger"}
 		w.Header().Set("Content-Type", "application/json")

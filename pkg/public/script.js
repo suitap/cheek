@@ -1,10 +1,13 @@
 const triggerJob = (jobName) => {
-    const Http = new XMLHttpRequest();
-    const url = '/trigger/' + jobName;
-    Http.open("GET", url);
-    Http.send();
-
-    Http.onreadystatechange = (e) => {
-        console.log(Http.responseText)
-    }
+    fetch('/trigger/' + jobName, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams(new FormData(document.form)),
+    }).then(response => {
+        return response.json()
+    }).then(_json => {
+        window.location.reload();
+    });
 }

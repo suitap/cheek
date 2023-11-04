@@ -1,5 +1,10 @@
 {{ define "jobview"}}
-<button class="button icon-only outline" onClick="triggerJob({{.SelectedJobSpec.Name}})">
+<form name="form" onsubmit="return false;">
+  {{ range $k, $v := .SelectedJobSpec.Params }}
+  <label>{{ $k }} <input type="text" name="{{ $k }}" value="{{ $v }}" /></label>
+  {{ end }}
+</form>
+<button class="button icon-only outline" onClick="triggerJob({{.SelectedJobSpec.Name}});">
   <picture>
     <source srcset="/static/img/play-light.svg" media="(prefers-color-scheme: dark)">
     <img src="/static/img/play-dark.svg">

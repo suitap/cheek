@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/adhocore/gronx"
@@ -26,8 +28,9 @@ type OnEvent struct {
 
 // JobSpec holds specifications and metadata of a job.
 type JobSpec struct {
-	Cron    string      `yaml:"cron,omitempty" json:"cron,omitempty"`
-	Command stringArray `yaml:"command" json:"command"`
+	Cron    string            `yaml:"cron,omitempty" json:"cron,omitempty"`
+	Command stringArray       `yaml:"command" json:"command"`
+	Params  map[string]string `yaml:"params,omitempty" json:"params,omitempty"`
 
 	OnSuccess OnEvent `yaml:"on_success,omitempty" json:"on_success,omitempty"`
 	OnError   OnEvent `yaml:"on_error,omitempty" json:"on_error,omitempty"`
@@ -48,12 +51,13 @@ type JobSpec struct {
 type JobRun struct {
 	Status      int `json:"status"`
 	logBuf      bytes.Buffer
-	Log         string        `json:"log"`
-	Name        string        `json:"name"`
-	TriggeredAt time.Time     `json:"triggered_at"`
-	TriggeredBy string        `json:"triggered_by"`
-	Triggered   []string      `json:"triggered,omitempty"`
-	Duration    time.Duration `json:"duration,omitempty"`
+	Log         string            `json:"log"`
+	Name        string            `json:"name"`
+	TriggeredAt time.Time         `json:"triggered_at"`
+	TriggeredBy string            `json:"triggered_by"`
+	Triggered   []string          `json:"triggered,omitempty"`
+	Duration    time.Duration     `json:"duration,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
 	jobRef      *JobSpec
 }
 
@@ -85,7 +89,7 @@ func (j *JobSpec) finalize(jr *JobRun) {
 	j.OnEvent(jr)
 }
 
-func (j *JobSpec) execCommandWithRetry(trigger string) JobRun {
+func (j *JobSpec) execCommandWithRetry(trigger string, parameters map[string]string) JobRun {
 	tries := 0
 	var jr JobRun
 	const timeOut = 5 * time.Second
@@ -94,9 +98,9 @@ func (j *JobSpec) execCommandWithRetry(trigger string) JobRun {
 
 		switch {
 		case tries == 0:
-			jr = j.execCommand(trigger)
+			jr = j.execCommand(trigger, parameters)
 		default:
-			jr = j.execCommand(fmt.Sprintf("%s[retry=%v]", trigger, tries))
+			jr = j.execCommand(fmt.Sprintf("%s[retry=%v]", trigger, tries), parameters)
 		}
 
 		// finalise logging etc
@@ -121,7 +125,7 @@ func (j JobSpec) now() time.Time {
 	return time.Now()
 }
 
-func (j *JobSpec) execCommand(trigger string) JobRun {
+func (j *JobSpec) execCommand(trigger string, parameters map[string]string) JobRun {
 	j.log.Info().Str("job", j.Name).Str("trigger", trigger).Msgf("Job triggered")
 	// init status to non-zero until execution says otherwise
 	jr := JobRun{Name: j.Name, TriggeredAt: j.now(), TriggeredBy: trigger, Status: -1, jobRef: j}
@@ -141,7 +145,23 @@ func (j *JobSpec) execCommand(trigger string) JobRun {
 	case 1:
 		cmd = exec.Command(j.Command[0])
 	default:
-		cmd = exec.Command(j.Command[0], j.Command[1:]...)
+		params := make([]string, 0, len(j.Command)-1)
+		for _, param := range j.Command[1:] {
+			tmpl, err := template.New("param").Parse(param)
+			if err != nil {
+				params = append(params, param)
+			} else {
+				writer := new(strings.Builder)
+				err := tmpl.Execute(writer, parameters)
+				if err != nil {
+					params = append(params, param)
+				} else {
+					params = append(params, writer.String())
+				}
+			}
+		}
+
+		cmd = exec.Command(j.Command[0], params...)
 	}
 
 	// add env vars
@@ -258,7 +278,7 @@ func (j *JobSpec) OnEvent(jr *JobRun) {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup) {
 			defer wg.Done()
-			tj.execCommandWithRetry(fmt.Sprintf("job[%s]", j.Name))
+			tj.execCommandWithRetry(fmt.Sprintf("job[%s]", j.Name), make(map[string]string))
 		}(&wg)
 	}
 
@@ -314,7 +334,7 @@ func RunJob(log zerolog.Logger, cfg Config, scheduleFn string, jobName string) (
 	}
 	for _, job := range s.Jobs {
 		if job.Name == jobName {
-			jr := job.execCommand("manual")
+			jr := job.execCommand("manual", make(map[string]string))
 			job.finalize(&jr)
 			return jr, nil
 		}

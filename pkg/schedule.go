@@ -51,7 +51,7 @@ func (s *Schedule) Run() {
 					}
 
 					go func(j *JobSpec) {
-						j.execCommandWithRetry("cron")
+						j.execCommandWithRetry("cron", make(map[string]string))
 					}(j)
 				}
 			}
